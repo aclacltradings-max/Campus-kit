@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { pushOverlay } from '@/lib/overlayStack';
 
 interface ModalProps {
   open: boolean;
@@ -35,6 +36,9 @@ export function Modal({
 
   useEffect(() => {
     if (!open) return;
+    // Register with the overlay stack so Android's back button closes this
+    // dialog instead of leaving the app.
+    const unregister = pushOverlay(onClose);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
@@ -48,6 +52,7 @@ export function Modal({
       focusable?.focus();
     }, 60);
     return () => {
+      unregister();
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = previousOverflow;
       window.clearTimeout(focusTimer);

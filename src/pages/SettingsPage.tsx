@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bell,
   Crown,
@@ -27,6 +27,14 @@ import { ConfirmDialog } from '@/components/ui/Modal';
 import { exportTasks } from '@/lib/export';
 import { parseImportPayload, validateDisplayName, validateEmail } from '@/lib/validation';
 import { clearAll, estimateStorageBytes, formatBytes } from '@/lib/storage';
+import {
+  ensureNotificationPermission,
+  hasExactAlarmPermission,
+  initNotificationChannel,
+  requestExactAlarmPermission,
+  syncScheduledReminders,
+} from '@/lib/notifications';
+import { isNative } from '@/lib/platform';
 import { computeStats } from '@/lib/tasks';
 import type { DateFormat, DefaultView, Density, TimeFormat } from '@/types';
 
@@ -53,6 +61,7 @@ export function SettingsPage() {
   const [nameError, setNameError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<null | 'clear' | 'reset'>(null);
+  const [needsExactAlarm, setNeedsExactAlarm] = useState(false);
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
 
   const stats = useMemo(() => computeStats(tasks), [tasks]);
@@ -68,34 +77,75 @@ export function SettingsPage() {
     toast.success('Profile updated');
   };
 
-  const requestNotifications = async () => {
-    if (typeof Notification === 'undefined') {
-      toast.error('Notifications unavailable', 'This browser does not support desktop notifications.');
+  // Android 12+ needs a separate grant before reminders can fire at an exact
+  // time. Check it once on mount so the prompt is visible before the user relies
+  // on a deadline alert.
+  useEffect(() => {
+    if (!isNative) return;
+    void hasExactAlarmPermission().then((ok) => setNeedsExactAlarm(!ok));
+  }, []);
+
+  const enableNotifications = async () => {
+    const granted = await ensureNotificationPermission();
+    if (!granted) {
+      toast.info('Notifications blocked', 'Enable them in your device settings to receive deadline alerts.');
+      return false;
+    }
+    await initNotificationChannel();
+    updateSettings({ notificationsEnabled: true });
+    // Schedule immediately so the user gets the benefit without waiting for the
+    // next background sync.
+    await syncScheduledReminders(tasks, true);
+    if (isNative) {
+      const exact = await hasExactAlarmPermission();
+      setNeedsExactAlarm(!exact);
+      if (!exact) {
+        toast.info(
+          'One more step',
+          'Allow exact alarms so reminders arrive on time rather than in a batched window.',
+        );
+      } else {
+        toast.success('Notifications enabled', 'You will be alerted before deadlines, even when the app is closed.');
+      }
+    } else {
+      toast.success('Notifications enabled', 'You will be alerted before deadlines.');
+    }
+    return true;
+  };
+
+  const handleNotificationsToggle = async (next: boolean) => {
+    if (!next) {
+      updateSettings({ notificationsEnabled: false });
       return;
     }
-    try {
-      const permission = await Notification.requestPermission();
-      if (permission === 'granted') {
-        toast.success('Notifications enabled', 'You will be alerted before deadlines.');
-        updateSettings({ notificationsEnabled: true });
-      } else {
-        toast.info('Notifications blocked', 'You can enable them in your browser settings.');
-      }
-    } catch {
-      toast.error('Could not request permission');
+    await enableNotifications();
+  };
+
+  const grantExactAlarms = async () => {
+    const granted = await requestExactAlarmPermission();
+    setNeedsExactAlarm(!granted);
+    if (granted) {
+      toast.success('Exact alarms allowed', 'Deadline reminders will now arrive on time.');
+    } else {
+      toast.info('Still off', 'You can enable exact alarms later from your device settings.');
     }
   };
 
-  const handleExport = (format: 'json' | 'csv' | 'markdown') => {
+  const handleExport = async (format: 'json' | 'csv' | 'markdown') => {
     if (!entitlements.exportFormats.includes(format)) {
       toast.error('Upgrade required', format.toUpperCase() + ' export is a Premium capability.');
       return;
     }
-    const message = exportTasks(format, tasks, categories, {
-      total: stats.total,
-      completed: stats.completed,
-    });
-    toast.success('Export complete', message);
+    try {
+      const message = await exportTasks(format, tasks, categories, {
+        total: stats.total,
+        completed: stats.completed,
+      });
+      toast.success('Export complete', message);
+    } catch (error) {
+      console.error('[CampusKit] Export failed.', error);
+      toast.error('Export failed', 'The file could not be written. Check storage permissions.');
+    }
   };
 
   const handleImport = async (file: File) => {
@@ -244,9 +294,9 @@ export function SettingsPage() {
           <div className="space-y-5">
             <Toggle
               checked={settings.notificationsEnabled}
-              onChange={(v) => updateSettings({ notificationsEnabled: v })}
-              label="In-app notifications"
-              description="Reminder and overdue alerts inside the workspace."
+              onChange={(v) => void handleNotificationsToggle(v)}
+              label="Notifications and reminders"
+              description="Reminder and overdue alerts, delivered even when the app is closed."
             />
             <div>
               <span className="ck-label">Reminder lead time</span>
@@ -263,9 +313,14 @@ export function SettingsPage() {
               />
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={requestNotifications} icon={<Bell className="h-3.5 w-3.5" />}>
-                Enable browser notifications
+              <Button variant="ghost" size="sm" onClick={() => void enableNotifications()} icon={<Bell className="h-3.5 w-3.5" />}>
+                {isNative ? 'Allow notifications' : 'Enable browser notifications'}
               </Button>
+              {needsExactAlarm && (
+                <Button variant="gold" size="sm" onClick={() => void grantExactAlarms()} icon={<Bell className="h-3.5 w-3.5" />}>
+                  Allow exact alarms
+                </Button>
+              )}
               {!entitlements.reminders && (
                 <span className="ck-chip text-gold-300">
                   <Crown className="h-3 w-3" /> Reminders are Premium

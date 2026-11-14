@@ -4,15 +4,25 @@ import { createPortal } from 'react-dom';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Topbar } from '@/components/layout/Topbar';
 import { MobileNav } from '@/components/layout/MobileNav';
+import { useNativeLifecycle } from '@/hooks/useNativeLifecycle';
+import { pushOverlay } from '@/lib/overlayStack';
 
 export function AppShell() {
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
 
+  useNativeLifecycle();
+
   useEffect(() => {
     setMenuOpen(false);
     window.scrollTo({ top: 0, behavior: 'auto' });
   }, [location.pathname]);
+
+  // Let Android's back button close the slide-out menu like any other overlay.
+  useEffect(() => {
+    if (!menuOpen) return;
+    return pushOverlay(() => setMenuOpen(false));
+  }, [menuOpen]);
 
   useEffect(() => {
     document.body.style.overflow = menuOpen ? 'hidden' : '';

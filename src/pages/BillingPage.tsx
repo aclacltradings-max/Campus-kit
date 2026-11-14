@@ -65,8 +65,8 @@ export function BillingPage() {
           <Button
             variant="ghost"
             icon={<Download className="h-4 w-4" />}
-            onClick={() => {
-              const message = exportTasks(
+            onClick={async () => {
+              const message = await exportTasks(
                 entitlements.exportFormats.includes('json') ? 'json' : 'json',
                 tasks,
                 categories,

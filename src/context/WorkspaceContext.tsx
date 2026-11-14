@@ -25,6 +25,14 @@ import {
 } from '@/context/store';
 import { entitlementsFor, getPlan, isPaidPlan } from '@/lib/plans';
 import { buildRecurringFollowUp, createTask, isOverdue } from '@/lib/tasks';
+import {
+  cancelAllReminders,
+  initNotificationChannel,
+  notificationPermissionGranted,
+  notifyNow,
+  syncScheduledReminders,
+} from '@/lib/notifications';
+import { isNative } from '@/lib/platform';
 import { uid } from '@/lib/id';
 import { useToast } from '@/context/ToastContext';
 import { useInterval } from '@/hooks/useInterval';
@@ -397,36 +405,62 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [state.tasks, state.categories],
   );
 
-  // Reminder engine — checks due reminders and raises notifications.
+  // Native notification setup. The channel is created once per launch; without
+  // it Android 8+ silently drops every notification posted to it.
+  useEffect(() => {
+    if (!state.hydrated || !isNative) return;
+    void initNotificationChannel();
+  }, [state.hydrated]);
+
+  // Keep the OS schedule in step with the task list. A reminder that only fires
+  // while the app happens to be open is not a reminder, so every task change
+  // re-reconciles what the system has queued. Debounced because editing a task
+  // dispatches several times in a row.
+  useEffect(() => {
+    if (!state.hydrated || !isNative) return;
+    const enabled = state.settings.notificationsEnabled && entitlements.reminders;
+    if (!enabled) {
+      void cancelAllReminders();
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      void notificationPermissionGranted().then((granted) => {
+        if (granted) void syncScheduledReminders(state.tasks, true);
+      });
+    }, 800);
+    return () => window.clearTimeout(handle);
+  }, [state.hydrated, state.tasks, state.settings.notificationsEnabled, entitlements.reminders]);
+
+  // Foreground reminder engine — raises the in-app alert the moment a reminder
+  // comes due while the app is open. When the app is closed the OS-scheduled
+  // notification handles it instead, so this covers only the open case.
   useInterval(() => {
     if (!state.settings.notificationsEnabled || !entitlements.reminders) return;
     const now = Date.now();
     state.tasks.forEach((task) => {
       if (task.status === 'completed' || task.reminderSent || !task.reminderAt) return;
-      const at = new Date(task.reminderAt).getTime();
-      if (at <= now) {
-        dispatch({ type: 'update-task', payload: { id: task.id, patch: { reminderSent: true }, touch: false } });
-        toast.gold('Reminder', task.title);
-        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-          try {
-            new Notification('CampusKit Private', { body: task.title });
-          } catch {
-            /* notification delivery is best-effort */
-          }
-        }
-      }
+      if (new Date(task.reminderAt).getTime() > now) return;
+      dispatch({ type: 'update-task', payload: { id: task.id, patch: { reminderSent: true }, touch: false } });
+      toast.gold('Reminder', task.title);
+      // On native the scheduled notification has already been delivered; only
+      // the browser path needs an extra push here.
+      if (!isNative) void notifyNow('CampusKit Private', task.title);
     });
   }, 45_000);
 
-  // Overdue sweep — surfaces newly overdue tasks once per session day.
+  // Overdue sweep — nudges once per session for tasks that slipped past their
+  // deadline, so they do not go unnoticed after a long break.
   const overdueAlerted = useRef(new Set<string>());
   useInterval(() => {
     if (!state.settings.notificationsEnabled) return;
     const overdue = state.tasks.filter((t) => isOverdue(t) && !t.archived);
-    overdue.forEach((task) => {
-      if (overdueAlerted.current.has(task.id)) return;
-      overdueAlerted.current.add(task.id);
-    });
+    const fresh = overdue.filter((task) => !overdueAlerted.current.has(task.id));
+    if (!fresh.length) return;
+    fresh.forEach((task) => overdueAlerted.current.add(task.id));
+    const lead = fresh[0];
+    const extra = fresh.length > 1 ? ` and ${fresh.length - 1} more` : '';
+    toast.gold('Overdue', `${lead.title}${extra}`);
+    void notifyNow('CampusKit overdue', `${lead.title}${extra}`, 2);
   }, 120_000);
 
   const value = useMemo<WorkspaceValue>(
