@@ -12,10 +12,12 @@ export default defineConfig({
   server: {
     host: true,
     port: 12000,
+    allowedHosts: ['.prod-runtime.all-hands.dev'],
   },
   preview: {
     host: true,
     port: 12000,
+    allowedHosts: ['.prod-runtime.all-hands.dev'],
   },
   build: {
     outDir: 'dist',
