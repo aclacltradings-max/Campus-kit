@@ -1,6 +1,16 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import type { Task } from '@/types';
 import { useWorkspace } from '@/context/WorkspaceContext';
+import { onNotificationTap } from '@/lib/notifications';
 import { TaskFormModal } from '@/components/tasks/TaskFormModal';
 import { TaskDetailDrawer } from '@/components/tasks/TaskDetailDrawer';
 
@@ -37,6 +47,31 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
   const openTask = useCallback((task: Task) => {
     setDetailId(task.id);
   }, []);
+
+  // Opening a reminder should land on the task it refers to. The tap can arrive
+  // before the task list has hydrated, so remember the id and apply it once the
+  // task appears.
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+  const pendingTaskId = useRef<string | null>(null);
+
+  useEffect(() => {
+    return onNotificationTap((taskId) => {
+      const task = tasksRef.current.find((t) => t.id === taskId);
+      if (task) setDetailId(task.id);
+      else pendingTaskId.current = taskId;
+    });
+  }, []);
+
+  useEffect(() => {
+    const id = pendingTaskId.current;
+    if (!id) return;
+    const task = tasks.find((t) => t.id === id);
+    if (task) {
+      pendingTaskId.current = null;
+      setDetailId(task.id);
+    }
+  }, [tasks]);
 
   const closeAll = useCallback(() => {
     setFormOpen(false);

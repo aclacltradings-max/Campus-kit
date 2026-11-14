@@ -1,0 +1,29 @@
+/* Self-hosted variable fonts — bundled so the app renders correctly offline.
+   Each family ships one variable file; the weight range below is the
+   font's fvar wght axis, so every weight in tailwind.config.js is covered
+   without extra downloads. Latin subset only: the UI is English. */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/fraunces.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono.woff2') format('woff2');
+}
+

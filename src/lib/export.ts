@@ -1,5 +1,5 @@
 import type { Category, Task } from '@/types';
-import { downloadFile } from '@/lib/storage';
+import { saveTextFile, type ExportFormat } from '@/lib/files';
 import { formatDate } from '@/lib/date';
 import { priorityMeta } from '@/lib/priority';
 
@@ -120,21 +120,30 @@ export function toMarkdown(tasks: Task[], categories: Category[], stats: { total
   return lines.join('\n');
 }
 
-export function exportTasks(
-  format: 'json' | 'csv' | 'markdown',
+export async function exportTasks(
+  format: ExportFormat,
   tasks: Task[],
   categories: Category[],
   stats: { total: number; completed: number },
-): string {
+): Promise<string> {
   const stamp = new Date().toISOString().slice(0, 10);
-  if (format === 'json') {
-    downloadFile(`campuskit-export-${stamp}.json`, toJSON(tasks, categories), 'application/json');
-    return 'JSON backup downloaded.';
-  }
-  if (format === 'csv') {
-    downloadFile(`campuskit-export-${stamp}.csv`, toCSV(tasks, categories), 'text/csv');
-    return 'CSV spreadsheet downloaded.';
-  }
-  downloadFile(`campuskit-report-${stamp}.md`, toMarkdown(tasks, categories, stats), 'text/markdown');
-  return 'Markdown report downloaded.';
+  const label = { json: 'JSON backup', csv: 'CSV spreadsheet', markdown: 'Markdown report' }[format];
+
+  const filename =
+    format === 'markdown'
+      ? `campuskit-report-${stamp}.md`
+      : `campuskit-export-${stamp}.${format}`;
+
+  const contents =
+    format === 'json'
+      ? toJSON(tasks, categories)
+      : format === 'csv'
+        ? toCSV(tasks, categories)
+        : toMarkdown(tasks, categories, stats);
+
+  const result = await saveTextFile(filename, contents, format);
+
+  if (result.via === 'share') return `${label} ready — choose where to save it.`;
+  if (result.via === 'cached') return `${label} saved to app storage.`;
+  return `${label} downloaded.`;
 }

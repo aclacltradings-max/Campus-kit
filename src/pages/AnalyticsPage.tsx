@@ -100,8 +100,8 @@ export function AnalyticsPage() {
             <Button
               variant="ghost"
               icon={<Download className="h-4 w-4" />}
-              onClick={() => {
-                const message = exportTasks('markdown', tasks, categories, {
+              onClick={async () => {
+                const message = await exportTasks('markdown', tasks, categories, {
                   total: stats.total,
                   completed: stats.completed,
                 });

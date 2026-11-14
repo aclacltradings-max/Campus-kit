@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { pushOverlay } from '@/lib/overlayStack';
 
 interface DrawerProps {
   open: boolean;
@@ -16,6 +17,9 @@ interface DrawerProps {
 export function Drawer({ open, onClose, title, subtitle, children, footer, side = 'right' }: DrawerProps) {
   useEffect(() => {
     if (!open) return;
+    // Register with the overlay stack so Android's back button closes this
+    // panel instead of leaving the app.
+    const unregister = pushOverlay(onClose);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
@@ -23,6 +27,7 @@ export function Drawer({ open, onClose, title, subtitle, children, footer, side 
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
+      unregister();
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = previous;
     };
